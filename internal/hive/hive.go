@@ -6,15 +6,15 @@ import (
 )
 
 type Hive struct {
-	BaseDir  string
-	ImageDir string
-	BuildDir string
+	BaseDir   string
+	ImageDir  string
+	BuildDir  string
 }
 
 func New() *Hive {
 	home, _ := os.UserHomeDir()
 	base := filepath.Join(home, ".local", "share", "moschito")
-
+	
 	h := &Hive{
 		BaseDir:  base,
 		ImageDir: filepath.Join(base, "images"),
@@ -25,4 +25,4 @@ func New() *Hive {
 	os.MkdirAll(h.BuildDir, 0755)
 
 	return h
-}
+}	
