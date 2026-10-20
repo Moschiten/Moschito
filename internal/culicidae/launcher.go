@@ -7,11 +7,18 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"syscall"
 )
 
+//go:embed midge-linux-amd64
+var midgeAMD64 []byte
+
 //go:embed midge-linux-arm64
-var midgeBinary []byte
+var midgeARM64 []byte
+
+//go:embed libfakechroot.so
+var fakechrootSO []byte
 
 type Backend interface {
 	Execute(rootfs, workdir string, command []string, env map[string]string) error
@@ -20,24 +27,75 @@ type Backend interface {
 
 func DetectBackend() Backend {
 	if runtime.GOOS == "android" || os.Getenv("TERMUX_VERSION") != "" {
-		if _, err := exec.LookPath("proot"); err == nil {
-			fmt.Println("-> [Host] Using proot to launch Midge")
-			return &ProotBackend{}
-		}
+		fmt.Println("-> [Host] Android detected. Using Go ptrace Tracer + Midge + Fakechroot.")
+		return &TracerBackend{}
 	}
-	fmt.Println("-> [Host] Using native MFE to launch Midge")
+	fmt.Println("-> [Host] Linux detected. Using Native MFE + Midge.")
 	return &NativeBackend{}
 }
 
-// injectMidge drops the static binary into the container
 func injectMidge(rootfs string) error {
+	var midgeData []byte
+	if runtime.GOARCH == "arm64" {
+		midgeData = midgeARM64
+	} else {
+		midgeData = midgeAMD64
+	}
 	midgeDir := filepath.Join(rootfs, ".moschito")
 	os.MkdirAll(midgeDir, 0755)
+	
 	targetPath := filepath.Join(midgeDir, "midge")
-	return os.WriteFile(targetPath, midgeBinary, 0755)
+	os.Remove(targetPath) 
+	
+	return os.WriteFile(targetPath, midgeData, 0755)
 }
 
-// --- Native Backend ---
+// --- Tracer Backend (Android) ---
+type TracerBackend struct{}
+
+func (t *TracerBackend) Name() string { return "go-tracer" }
+
+func (t *TracerBackend) Execute(rootfs, workdir string, command []string, env map[string]string) error {
+	if err := injectMidge(rootfs); err != nil {
+		return err
+	}
+
+	// Inject fakechroot shared library
+	soPath := filepath.Join(rootfs, ".moschito", "libfakechroot.so")
+	if err := os.WriteFile(soPath, fakechrootSO, 0755); err != nil {
+		return err
+	}
+
+	midgePath := filepath.Join(rootfs, ".moschito", "midge")
+	args := append([]string{midgePath}, command...)
+
+	var cleanEnv []string
+	for _, e := range os.Environ() {
+		if !strings.HasPrefix(e, "LD_PRELOAD=") {
+			cleanEnv = append(cleanEnv, e)
+		}
+	}
+	cleanEnv = append(cleanEnv, "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
+	cleanEnv = append(cleanEnv, "FAKECHROOT_BASE="+rootfs)
+	cleanEnv = append(cleanEnv, "MOSCHITO_WORKDIR="+workdir)
+	
+	// Set LD_PRELOAD to the HOST path so the glibc linker finds it
+	cleanEnv = append(cleanEnv, "LD_PRELOAD="+soPath)
+
+	for k, v := range env {
+		cleanEnv = append(cleanEnv, fmt.Sprintf("%s=%s", k, v))
+	}
+
+	hostWorkdir := rootfs
+	if workdir != "" && workdir != "/" {
+		hostWorkdir = filepath.Join(rootfs, workdir)
+		os.MkdirAll(hostWorkdir, 0755) 
+	}
+
+	return Tracer(args, cleanEnv, hostWorkdir)
+}
+
+// --- Native Linux Backend ---
 type NativeBackend struct{}
 func (n *NativeBackend) Name() string { return "native-mfe" }
 
@@ -45,8 +103,6 @@ func (n *NativeBackend) Execute(rootfs, workdir string, command []string, env ma
 	if err := injectMidge(rootfs); err != nil {
 		return err
 	}
-
-	// Execute Midge, passing the user's command to it
 	midgeArgs := append([]string{"/.moschito/midge"}, command...)
 	cmd := exec.Command(midgeArgs[0], midgeArgs[1:]...)
 	
@@ -65,36 +121,6 @@ func (n *NativeBackend) Execute(rootfs, workdir string, command []string, env ma
 	for k, v := range env {
 		cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", k, v))
 	}
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
-	return cmd.Run()
-}
-
-// --- Proot Backend ---
-type ProotBackend struct{}
-func (p *ProotBackend) Name() string { return "proot" }
-
-func (p *ProotBackend) Execute(rootfs, workdir string, command []string, env map[string]string) error {
-	if err := injectMidge(rootfs); err != nil {
-		return err
-	}
-
-	args := []string{"--kill-on-exit", "--link2symlink", "-0", "-r", rootfs}
-	if workdir != "" && workdir != "/" {
-		args = append(args, "-w", workdir)
-	} else {
-		args = append(args, "-w", "/")
-	}
-	args = append(args, "-b", "/dev", "-b", "/proc", "-b", "/sys")
-	for k, v := range env {
-		args = append(args, "-E", fmt.Sprintf("%s=%s", k, v))
-	}
-	
-	// Tell proot to ONLY run Midge
-	args = append(args, "/.moschito/midge")
-	args = append(args, command...)
-
-	cmd := exec.Command("proot", args...)
-	cmd.Env = append(os.Environ(), "PROOT_NO_SECCOMP=1", "PROOT_TMP_DIR="+os.Getenv("PREFIX")+"/tmp")
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	return cmd.Run()
 }

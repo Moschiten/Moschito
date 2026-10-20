@@ -337,15 +337,25 @@ func tarDirectory(src, dest string) error {
 
 	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
 		if err != nil { return err }
-		header, err := tar.FileInfoHeader(info, "")
-		if err != nil { return err }
 		
 		relPath, err := filepath.Rel(src, path)
 		if err != nil { return err }
+		if relPath == "." { return nil } // Skip the root dir itself
+
+		link := ""
+		if info.Mode()&os.ModeSymlink != 0 {
+			link, _ = os.Readlink(path)
+		}
+
+		header, err := tar.FileInfoHeader(info, link)
+		if err != nil { return err }
+		
 		header.Name = relPath
 		
 		if err := tw.WriteHeader(header); err != nil { return err }
-		if !info.IsDir() {
+		
+		// ONLY copy data if it is a regular file (avoid directories and symlinks)
+		if info.Mode().IsRegular() {
 			data, err := os.Open(path)
 			if err != nil { return err }
 			defer data.Close()

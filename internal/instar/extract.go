@@ -51,28 +51,21 @@ func ExtractLayer(blobPath string, destDir string) error {
 
 		case tar.TypeSymlink:
 			os.RemoveAll(target)
-			linkname := header.Linkname
-			
-			// Fix absolute symlinks for proot
-			if filepath.IsAbs(linkname) {
-				rel, err := filepath.Rel(filepath.Dir(target), filepath.Join(destDir, linkname))
-				if err == nil {
-					linkname = rel
-				}
+			if err := os.Symlink(header.Linkname, target); err != nil {
+				return fmt.Errorf("failed to create symlink: %w", err)
 			}
-			os.Symlink(linkname, target)
 
 		case tar.TypeLink:
 			linkTarget := filepath.Join(destDir, header.Linkname)
 			os.RemoveAll(target)
-			
-			// Try hardlink, fallback to copy (Android fix)
 			if err := os.Link(linkTarget, target); err != nil {
-				copyFile(linkTarget, target)
+				// Fallback to copy if hardlink fails
+				if err := copyFile(linkTarget, target); err != nil {
+					return fmt.Errorf("failed to create hardlink/copy: %w", err)
+				}
 			}
 		}
 
-		// OCI Whiteouts
 		baseName := filepath.Base(header.Name)
 		if strings.HasPrefix(baseName, ".wh.") {
 			realFileName := strings.TrimPrefix(baseName, ".wh.")

@@ -1,10 +1,6 @@
 # moschito:1
-PULL ubuntu:24.04 TO builder
+PULL ubuntu:22.04 TO builder
 DIR /app
-CP test.txt /app/test.txt
-
-# Run bash directly. midge will find it and execute it.
-RUN /bin/bash -c "echo 'System check passed' > /app/status.txt"
-
-# Run cat directly.
-RUN cat /app/test.txt
+RUN /bin/bash -c "echo 'Moschito works!' > /app/test.txt"
+RUN /bin/cat /app/test.txt
+DONE my-ubuntu-app:1.0000
