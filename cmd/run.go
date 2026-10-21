@@ -104,12 +104,14 @@ func extractImage(tarPath, dest string) {
 		}
 		
 		// Extract the rootfs
-		if header.Name == "layer.tar" {
-			rootfsPath := filepath.Join(dest, "rootfs")
-			os.MkdirAll(rootfsPath, 0755)
-			instar.ExtractLayer(target, rootfsPath)
-		}
-	}
+                if header.Name == "layer.tar" {
+	          rootfsPath := filepath.Join(dest, "rootfs")
+	          os.MkdirAll(rootfsPath, 0755)
+	          if err := instar.ExtractLayer(target, rootfsPath); err != nil {
+		    fmt.Printf("ERROR: Failed to extract layer.tar: %v\n", err)
+	          }
+            }
+      }
 }
 
 func init() {

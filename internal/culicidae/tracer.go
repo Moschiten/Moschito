@@ -66,18 +66,21 @@ func Tracer(args []string, env []string, workdir string) error {
 			continue
 		}
 
-		// Handle new child processes (forks, clones)
-		if ws.StopSignal() == syscall.SIGTRAP {
-			if ws.TrapCause() == syscall.PTRACE_EVENT_CLONE || ws.TrapCause() == syscall.PTRACE_EVENT_FORK || ws.TrapCause() == syscall.PTRACE_EVENT_VFORK {
-				msg, err := syscall.PtraceGetEventMsg(stoppedPid)
-				if err == nil {
-					newPid := int(msg)
-					activePids[newPid] = true
-					isEntry[newPid] = true
-				}
-			}
-			continue
-		}
+		// Handle new child processes (forks, clones) and execve
+                if ws.StopSignal() == syscall.SIGTRAP {
+	          if ws.TrapCause() == syscall.PTRACE_EVENT_CLONE || ws.TrapCause() == syscall.PTRACE_EVENT_FORK || ws.TrapCause() == syscall.PTRACE_EVENT_VFORK {
+		    msg, err := syscall.PtraceGetEventMsg(stoppedPid)
+		    if err == nil {
+		      newPid := int(msg)
+		      activePids[newPid] = true
+	  	      isEntry[newPid] = true
+		    }
+	          } else if ws.TrapCause() == syscall.PTRACE_EVENT_EXEC {
+		    // CRITICAL FIX: Reset the entry tracker after execve
+		    isEntry[stoppedPid] = true 
+	          }
+	          continue
+                }
 
 		// Handle syscall stops
 		if ws.StopSignal() == syscall.SIGTRAP|0x80 {
