@@ -17,13 +17,20 @@ func ExtractLayer(blobPath string, destDir string) error {
 	}
 	defer f.Close()
 
-	gzr, err := gzip.NewReader(f)
-	if err != nil {
-		return fmt.Errorf("failed to create gzip reader: %w", err)
+	// Try to read it as a gzip file first (standard for OCI layers)
+	gzr, gzErr := gzip.NewReader(f)
+	var tr *tar.Reader
+	
+	if gzErr == nil {
+		defer gzr.Close()
+		tr = tar.NewReader(gzr)
+	} else {
+		// If gzip fails, rewind the file and try reading it as a raw tar
+		if _, err := f.Seek(0, 0); err != nil {
+			return fmt.Errorf("failed to seek blob: %w", err)
+		}
+		tr = tar.NewReader(f)
 	}
-	defer gzr.Close()
-
-	tr := tar.NewReader(gzr)
 
 	for {
 		header, err := tr.Next()
@@ -59,7 +66,6 @@ func ExtractLayer(blobPath string, destDir string) error {
 			linkTarget := filepath.Join(destDir, header.Linkname)
 			os.RemoveAll(target)
 			if err := os.Link(linkTarget, target); err != nil {
-				// Fallback to copy if hardlink fails
 				if err := copyFile(linkTarget, target); err != nil {
 					return fmt.Errorf("failed to create hardlink/copy: %w", err)
 				}

@@ -130,7 +130,7 @@ var buildCmd = &cobra.Command{
 				for _, layer := range manifest.Layers {
 					digest := strings.TrimPrefix(layer.Digest, "sha256:")
 					blobPath := filepath.Join(cacheDir, digest)
-					
+
 					fmt.Printf("-> Extracting layer %s...\n", digest[:12])
 					if err := instar.ExtractLayer(blobPath, rootfsPath); err != nil {
 						fmt.Printf("Error: Failed to extract layer: %v\n", err)
@@ -209,13 +209,15 @@ var buildCmd = &cobra.Command{
 
 			case "CMD":
 				if currentCtx != nil {
-					currentCtx.Cmd = parseCommand(inst.Args[0])
+				   fullCmd := strings.Join(inst.Args, " ")
+				   currentCtx.Cmd = parseCommand(fullCmd)
 				}
 
 			case "POINT":
 				if currentCtx != nil {
-					currentCtx.Entrypoint = parseCommand(inst.Args[0])
-				}
+				   fullCmd := strings.Join(inst.Args, " ")
+			           currentCtx.Entrypoint = parseCommand(fullCmd)
+                                }
 
 			case "USR":
 				if currentCtx != nil { currentCtx.User = args[0] }
@@ -297,6 +299,17 @@ func interpolate(s string, vars map[string]string) string {
 }
 
 func parseCommand(cmdStr string) []string {
+	cmdStr = strings.TrimSpace(cmdStr)
+
+	// 1. Check for JSON array format: ["cmd", "arg"]
+	if strings.HasPrefix(cmdStr, "[") && strings.HasSuffix(cmdStr, "]") {
+		var result []string
+		if err := json.Unmarshal([]byte(cmdStr), &result); err == nil {
+			return result
+		}
+	}
+
+	// 2. Fall back to shell-style parsing
 	var args []string
 	var current strings.Builder
 	inQuotes := false

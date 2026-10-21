@@ -2,5 +2,5 @@
 PULL ubuntu:22.04 TO builder
 DIR /app
 RUN /bin/bash -c "echo 'Moschito works!' > /app/test.txt"
-RUN /bin/cat /app/test.txt
+CMD ["/bin/cat", "/app/test.txt"]
 DONE my-ubuntu-app:1.0000
